@@ -549,3 +549,149 @@ python 7_hnqt_mvp.py --dataset bioasq --max-docs 5000 --max-queries 200
 | **Multi-probe** | Searching multiple buckets at each level |
 | **Bucket** | An L2 cluster (leaf directory with SQLite database) |
 | **Router** | Centroids and cross-links for a directory level |
+
+
+Experiment 7:
+
+
+```
+Index built successfully!
+  Total documents: 5000
+  Total buckets: 64
+  Average insert time: 0.0147s
+
+Index Structure:
+  00/: 477 vectors [00(49), 01(33), 02(101), 03(114), 04(33), 05(59), 06(45), 07(43)]
+  01/: 878 vectors [00(109), 01(137), 02(135), 03(108), 04(123), 05(103), 06(50), 07(113)]
+  02/: 503 vectors [00(53), 01(56), 02(35), 03(62), 04(82), 05(80), 06(42), 07(93)]
+  03/: 831 vectors [00(73), 01(100), 02(69), 03(127), 04(118), 05(167), 06(82), 07(95)]
+  04/: 455 vectors [00(94), 01(99), 02(29), 03(30), 04(56), 05(21), 06(56), 07(70)]
+  05/: 740 vectors [00(114), 01(49), 02(109), 03(136), 04(102), 05(23), 06(114), 07(93)]
+  06/: 619 vectors [00(78), 01(67), 02(54), 03(127), 04(94), 05(97), 06(72), 07(30)]
+  07/: 497 vectors [00(57), 01(75), 02(85), 03(33), 04(49), 05(70), 06(64), 07(64)]
+  Total: 5000 vectors
+
+====================================================================================================
+RUNNING EVALUATION
+====================================================================================================
+
+Evaluating FAISS baseline (ground truth ceiling)...
+Evaluating HNQT (1,1) no teleport...
+Evaluating HNQT (1,1) + teleport...
+Evaluating HNQT (1,2) no teleport...
+Evaluating HNQT (1,2) + teleport...
+Evaluating HNQT (2,2) no teleport...
+Evaluating HNQT (2,2) + teleport...
+Evaluating HNQT (2,3) no teleport...
+Evaluating HNQT (2,3) + teleport...
+Evaluating HNQT (3,3) no teleport...
+Evaluating HNQT (3,3) + teleport...
+Evaluating HNQT (3,4) + teleport...
+Evaluating HNQT (4,4) + teleport...
+Evaluating HNQT (4,5) + teleport...
+Evaluating HNQT (5,5) + teleport...
+Evaluating HNQT (6,6) + teleport...
+Evaluating HNQT (8,8) + teleport [max]...
+
+====================================================================================================
+EVALUATION RESULTS (Recall@10) - Sorted by Search Aggressiveness
+====================================================================================================
+
+Configuration                       Recall           Time (ms)    Buckets      % Index    Teleports 
+----------------------------------------------------------------------------------------------------
+HNQT (1,1) no teleport              0.394 (±0.297)   1.59         1.0          1.6%       0.0        ↑
+HNQT (1,1) + teleport               0.530 (±0.299)   5.17         4.0          6.2%       3.0        ↑
+HNQT (1,2) no teleport              0.511 (±0.304)   2.85         2.0          3.1%       0.0       
+HNQT (1,2) + teleport               0.675 (±0.267)   6.95         6.9          10.9%      4.9        ↑
+HNQT (2,2) no teleport              0.652 (±0.272)   4.80         4.0          6.2%       0.0       
+HNQT (2,2) + teleport               0.751 (±0.233)   9.99         9.8          15.4%      7.0        ↑
+HNQT (2,3) no teleport              0.729 (±0.260)   6.27         6.0          9.4%       0.0       
+HNQT (2,3) + teleport               0.835 (±0.196)   13.08        13.9         21.7%      9.6        ↑
+HNQT (3,3) no teleport              0.805 (±0.226)   8.99         9.0          14.1%      0.0       
+HNQT (3,3) + teleport               0.887 (±0.162)   17.02        18.5         28.9%      12.6       ↑
+HNQT (3,4) + teleport               0.924 (±0.136)   20.58        23.2         36.2%      15.2       ↑
+HNQT (4,4) + teleport               0.939 (±0.120)   24.37        28.0         43.8%      18.0       ↑
+HNQT (4,5) + teleport               0.961 (±0.096)   28.69        33.3         52.1%      20.6       ↑
+HNQT (5,5) + teleport               0.968 (±0.089)   31.43        37.9         59.2%      22.9      
+HNQT (6,6) + teleport               0.988 (±0.035)   35.00        48.2         75.3%      27.7       ↑
+HNQT (8,8) + teleport [max]         1.000 (±0.000)   42.54        64.0         100.0%     31.2       ↑
+----------------------------------------------------------------------------------------------------
+FAISS (flat) [baseline]             1.000 (±0.000)   0.31         64           100.0%     N/A       
+
+====================================================================================================
+SUMMARY
+====================================================================================================
+  90% of baseline recall: HNQT (3,4) + teleport (recall=0.924, 36.2% of index)
+  95% of baseline recall: HNQT (4,5) + teleport (recall=0.961, 52.1% of index)
+  99% of baseline recall: HNQT (8,8) + teleport [max] (recall=1.000, 100.0% of index)
+
+  Most efficient: HNQT (1,1) no teleport (recall=0.394, 1.6% of index)
+  Best recall: HNQT (8,8) + teleport [max] (recall=1.000, 100.0% of index)
+
+  HNQT achieves 100.0% of baseline recall
+
+====================================================================================================
+QUERY DIAGNOSTICS (Sample)
+====================================================================================================
+
+======================================================================
+DIAGNOSIS: Query 0
+======================================================================
+Query: Is Hirschsprung disease a mendelian or a multifactorial disorder?...
+Ground truth: [308, 2332, 1163, 4472, 2223]... (10 total)
+
+Query routes to: 05/02
+
+Ground truth distribution:
+  ✓ 05/02: 3 docs [308, 2223, 497]...
+    05/06: 5 docs [2332, 2353, 3247]...
+    06/03: 1 docs [4472]...
+    06/05: 1 docs [1163]...
+
+Cross-links from 05/02:
+  ✓ → 06/05 (sim=0.772)
+  ✓ → 06/03 (sim=0.718)
+    → 06/01 (sim=0.635)
+
+======================================================================
+DIAGNOSIS: Query 66
+======================================================================
+Query: What are the main results of PRKAR1A Knockdown?...
+Ground truth: [481, 1742, 3468, 4855, 4063]... (10 total)
+
+Query routes to: 01/01
+
+Ground truth distribution:
+  ✓ 01/01: 2 docs [3468, 1431]...
+    01/06: 2 docs [4168, 4808]...
+    01/07: 1 docs [481]...
+    03/05: 1 docs [4063]...
+    04/04: 2 docs [4855, 3471]...
+    05/00: 2 docs [1742, 4818]...
+
+Cross-links from 01/01:
+    → 03/03 (sim=0.724)
+    → 03/02 (sim=0.658)
+  ✓ → 03/05 (sim=0.577)
+
+======================================================================
+DIAGNOSIS: Query 133
+======================================================================
+Query: Which is the most known bacterium responsible for botulism (sausage-po...
+Ground truth: [4533, 3129, 4879, 4768, 2645]... (10 total)
+
+Query routes to: 07/02
+
+Ground truth distribution:
+    00/03: 1 docs [2092]...
+    01/07: 1 docs [2729]...
+    06/03: 1 docs [4768]...
+    07/00: 2 docs [3129, 4879]...
+  ✓ 07/02: 5 docs [4533, 2645, 2053]...
+
+Cross-links from 07/02:
+    → 06/05 (sim=0.507)
+    → 06/01 (sim=0.473)
+  ✓ → 06/03 (sim=0.391)
+
+```
