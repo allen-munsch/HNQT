@@ -1,6 +1,6 @@
 # HNQT: Hierarchical Navigable Quantization Trees
 
-## A Novel Filesystem-Native Architecture for Approximate Nearest Neighbor Search
+## A Filesystem-Native Architecture for Approximate Nearest Neighbor Search
 
 ---
 
