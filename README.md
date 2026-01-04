@@ -6,9 +6,9 @@
 
 ## Abstract
 
-We present **Hierarchical Navigable Quantization Trees (HNQT)**, a novel vector index architecture that combines hierarchical product quantization with graph-based navigability and filesystem-native storage. Unlike monolithic index structures, HNQT uses the filesystem hierarchy itself as a spatial partitioning scheme, with SQLite databases at leaf nodes providing ACID-compliant storage and metadata co-location. 
+Presented here **Hierarchical Navigable Quantization Trees (HNQT)**, a vector index architecture that combines hierarchical product quantization with graph-based navigability and filesystem-native storage. Unlike monolithic index structures, HNQT uses the filesystem hierarchy itself as a spatial partitioning scheme, with SQLite databases at leaf nodes providing ACID-compliant storage and metadata co-location. 
 
-Our proof-of-concept on the BioASQ biomedical dataset (5000 documents, 200 queries) demonstrates:
+The proof-of-concept on the BioASQ biomedical dataset (5000 documents, 200 queries) demonstrates:
 
 - **88.7% recall searching only 28.9% of the index**
 - **96.1% recall at 52.1% of index** (near-perfect at half the work)
@@ -35,9 +35,9 @@ Modern vector databases face a fundamental tension:
 
 Existing solutions optimize for subsets of these requirements but struggle to address all simultaneously.
 
-### 1.2 Our Insight
+### 1.2 An Insight
 
-**The filesystem is already a hierarchical, distributed, ACID-compliant data structure.** Rather than fighting against it with memory-mapped monolithic files, we embrace it:
+**The filesystem is already a hierarchical, distributed, ACID-compliant data structure.** Rather than fighting against it with memory-mapped monolithic files, HNQT embraces it:
 
 ```
 vdb/
@@ -702,7 +702,7 @@ Cross-links from 07/02:
 
 ### **1.1 Analysis of HNQT v7 Performance**
 
-Our evaluation of HNQT v7 revealed a fundamental performance characteristic:
+An evaluation of HNQT v7 revealed a fundamental performance characteristic:
 
 | Operation | Latency | Throughput |
 |-----------|---------|------------|
@@ -828,7 +828,7 @@ class BatchedWriteManager:
 
 **Actual Performance Encountered (implementation challenges):**
 
-During implementation, we encountered SQLite operational constraints:
+During implementation of v8, encountered SQLite operational constraints:
 
 1. **PRAGMA synchronous cannot be changed inside transactions** → Required connection-level configuration
 2. **Connection pooling needed** to avoid per-batch connection overhead
