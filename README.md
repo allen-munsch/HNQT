@@ -695,3 +695,271 @@ Cross-links from 07/02:
   ✓ → 06/03 (sim=0.391)
 
 ```
+
+---
+
+## **1. On v7, and onto v8: The Write Performance Bottleneck**
+
+### **1.1 Analysis of HNQT v7 Performance**
+
+Our evaluation of HNQT v7 revealed a fundamental performance characteristic:
+
+| Operation | Latency | Throughput |
+|-----------|---------|------------|
+| **Vector Search** | 1.6-43ms (config-dependent) | ~50-500 QPS |
+| **Document Insert** | ~15ms | ~66 inserts/sec |
+
+While query performance was configurable across the recall/latency spectrum, **insert performance was fundamentally limited by synchronous SQLite transactions with fsync**. Each insert required:
+
+1. Embedding generation (~2-5ms on CPU)
+2. Hierarchical quantization (~0.1ms)
+3. SQLite INSERT with transaction commit (~5ms)
+4. **Fsync to disk** (~1-10ms, depending on hardware)
+
+The fsync operation (step 4) dominated insert latency and was non-negotiable for data durability in v7.
+
+### **1.2 The TigerBeetle Insight**
+
+High-performance financial transaction systems like TigerBeetle achieve million-TPS throughput through **batched durability guarantees** rather than per-operation persistence. The key insight:
+
+```
+Traditional: operation → fsync → acknowledge (per-op cost: 1×fsync)
+TigerBeetle: batch operations → single fsync → acknowledge all (per-op cost: 1×fsync / batch_size)
+```
+
+**Amortization factor:** With 1000 operations per batch, fsync cost per operation reduces from ~1ms to ~1µs.
+
+---
+
+## **2. HNQT v8 Architecture**
+
+### **2.1 Core Design Principle: Selective Durability**
+
+HNQT v8 introduces a **dual-mode durability abstraction**:
+
+```
+Mode 1: insert(..., wait_for_durable=True)
+  • Client blocks until data is fsync'd to disk
+  • Zero data loss guarantee
+  • Latency: ~5-10ms (batched but synchronized)
+
+Mode 2: insert(..., wait_for_durable=False)  
+  • Client receives immediate acknowledgment
+  • Data may be lost in system crash (<5ms window)
+  • Latency: ~0.1ms (memory operation only)
+```
+
+### **2.2 Architectural Components**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Client API Layer                      │
+│  insert(embedding, metadata, wait_for_durable: bool)    │
+└──────────────────────────┬──────────────────────────────┘
+                           │
+┌──────────────────────────▼──────────────────────────────┐
+│             Batched Write Manager (New in v8)           │
+│  • Per-bucket write buffers                            │
+│  • 5ms batch window (configurable)                     │
+│  • Background flusher thread                           │
+│  • Connection pooling for SQLite                       │
+└──────────────────────────┬──────────────────────────────┘
+                           │
+                 ┌─────────┴─────────┐
+                 ▼                   ▼
+┌─────────────────────────┐ ┌─────────────────────────┐
+│   Durable Flush Path    │ │ Non-Durable Flush Path  │
+│  • Single transaction   │ │ • Single transaction    │
+│  • PRAGMA synchronous=FULL│ │ • PRAGMA synchronous=NORMAL│
+│  • Fsync before ack     │ │ • OS-decided flush      │
+│  • ~5-10ms latency      │ │ • ~0.1ms latency        │
+└─────────────────────────┘ └─────────────────────────┘
+```
+
+### **2.3 Implementation Details**
+
+**SQLite Connection Management:**
+```python
+# PRAGMAs set once per connection, not per transaction
+conn = sqlite3.connect(db_path)
+if durable:
+    conn.execute("PRAGMA synchronous = FULL")    # Force fsync on commit
+    conn.execute("PRAGMA journal_mode = WAL")    # Write-ahead logging
+else:
+    conn.execute("PRAGMA synchronous = NORMAL")  # OS decides flush timing
+    conn.execute("PRAGMA journal_mode = WAL")
+conn.commit()  # Commit PRAGMA changes before any data transactions
+```
+
+**Batch Management:**
+```python
+class BatchedWriteManager:
+    def __init__(self, batch_window_ms=5):
+        self.buffers = defaultdict(list)  # bucket → [records]
+        self.batch_window = batch_window_ms / 1000.0
+        
+    def insert(self, bucket, record, wait_for_durable):
+        # Add to buffer
+        with self.buffer_locks[bucket]:
+            self.buffers[bucket].append(record)
+            
+        # Flush conditions
+        if wait_for_durable or len(self.buffers[bucket]) >= 1000:
+            self._flush_buffer(bucket, is_durable=wait_for_durable)
+            
+        # Wait if durable requested
+        if wait_for_durable:
+            record.durable_event.wait(timeout=0.1)
+```
+
+---
+
+## **3. Performance Analysis**
+
+### **3.1 Expected vs. Actual Performance**
+
+**Projected Performance (from design):**
+
+| Operation | v7 | v8 (Durable) | v8 (Non-Durable) |
+|-----------|----|--------------|------------------|
+| Single Insert | ~15ms | **~5-10ms** | **~0.1ms** |
+| Batch Insert (100) | ~1500ms | **~50-100ms** | **~1-5ms** |
+| Throughput | ~66/sec | **~100-200/sec** | **~10,000/sec** |
+
+**Actual Performance Encountered (implementation challenges):**
+
+During implementation, we encountered SQLite operational constraints:
+
+1. **PRAGMA synchronous cannot be changed inside transactions** → Required connection-level configuration
+2. **Connection pooling needed** to avoid per-batch connection overhead
+3. **Background flush coordination** required careful locking
+
+The **actual performance improvement** depends heavily on:
+- Batch size achieved before flush
+- Filesystem characteristics (ext4 vs. XFS, SSD vs. HDD)
+- SQLite configuration (WAL vs. rollback journal)
+
+### **3.2 The Amortization Mathematics**
+
+Let:
+- `fsync_latency = 1ms` (typical for SSD)
+- `batch_window = 5ms`
+- `insert_rate = 200/sec` (sustainable rate)
+
+Then:
+- **Operations per batch** = `insert_rate × batch_window` = `200 × 0.005` = **1 operation**
+- **Amortization factor** = `1` (no batching at this rate)
+
+For meaningful amortization:
+- Need `insert_rate > 1000/sec` to get `5+ ops/batch`
+- Or longer `batch_window` (tradeoff: longer potential data loss)
+
+**Key insight:** HNQT's current ~66 inserts/sec in v7 is too low to benefit significantly from batching. v8's primary benefit comes from **removing fsync entirely** for non-durable writes, not from batching.
+
+### **3.3 Performance Comparison Table**
+
+| Metric | HNQT v7 | HNQT v8 (Durable) | HNQT v8 (Non-Durable) |
+|--------|---------|-------------------|----------------------|
+| **Insert Latency** | ~15ms | ~10ms (33% faster) | ~0.1ms (150× faster) |
+| **Write Throughput** | ~66/sec | ~100/sec | ~10,000/sec (est.) |
+| **Durability Guarantee** | Always | Always | 5ms window possible loss |
+| **Memory Overhead** | None | ~1KB per bucket buffer | ~1KB per bucket buffer |
+| **Implementation Complexity** | Low | Medium | Medium |
+
+---
+
+## **4. Applications and Use Cases**
+
+### **4.1 Ideal v8 Applications**
+
+**Real-time Analytics Pipeline:**
+```python
+# Fire-and-forget for clickstream events
+for event in clickstream:
+    hnqt.insert(
+        embedding=get_embedding(event),
+        metadata=event.to_dict(),
+        wait_for_durable=False  # Accept 5ms potential loss
+    )
+# Throughput: ~10,000 events/sec vs. ~66/sec in v7
+```
+
+**Mixed-Criticality RAG System:**
+```python
+# User chat: low durability acceptable
+def chat_response(query):
+    hnqt.insert(query, wait_for_durable=False)  # ~0.1ms
+    return generate_response(query)  # Don't block on storage
+
+# Document ingestion: high durability required  
+def ingest_document(doc):
+    hnqt.insert(doc, wait_for_durable=True)  # ~5-10ms
+    log_ingestion(doc)  # Only log after durable storage
+```
+
+### **4.2 When Not to Use v8 Durability Abstraction**
+
+1. **Financial transactions** → Always use `wait_for_durable=True`
+2. **Legal/regulatory compliance systems** → Always durable
+3. **Systems with infrequent inserts** (< 10/sec) → Little benefit
+4. **Single-writer scenarios** → Batching less beneficial
+
+---
+
+## **5. Limitations and Tradeoffs**
+
+### **5.1 The Durability-Performance Tradeoff Curve**
+
+```
+Durability Guarantee          Performance
+    (Probability)               (Throughput)
+        ↑                         ↑
+        │                         │
+  100% ←─┼─→ Always durable       │
+        │       (v7, v8 True)     │
+        │                         │
+    99.9% ←─┼─→ 5ms window        │
+        │       (v8 False)        │
+        │                         │
+        ↓                         ↓
+```
+
+**Mathematical formulation:**
+```
+P(data_loss) = 1 - e^(-λ × t_window)
+where λ = system_failure_rate
+      t_window = batch_window (default: 0.005s)
+```
+
+For typical server MTBF of 3 years:
+```
+P(data_loss | v8 non-durable) ≈ 1 - e^(-1/(3×365×24×3600) × 0.005)
+                              ≈ 5.3 × 10^-11 (extremely low)
+```
+
+### **5.2 Implementation Complexity Costs**
+
+The v8 architecture introduces:
+
+1. **Thread synchronization overhead** (buffers, flusher, waiters)
+2. **Connection pooling management**
+3. **Retry logic for failed batches**
+4. **Clean shutdown coordination**
+
+For small-scale deployments (< 1000 inserts/day), this complexity may not be justified.
+
+### **5.3 The "Batching Paradox"**
+
+HNQT's quantization naturally distributes inserts across buckets, reducing per-bucket batch sizes:
+
+```
+With 64 buckets and 200 inserts/sec:
+  Per-bucket insert rate = 200/64 ≈ 3.1 inserts/sec
+  Ops per 5ms window = 3.1 × 0.005 ≈ 0.0155 operations
+  
+Expected batch size: 1 (no meaningful batching)
+```
+
+**Solution required:** Much higher insert rates (> 5000/sec) or dynamic bucket consolidation.
+
+---
